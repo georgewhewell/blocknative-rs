@@ -29,3 +29,12 @@ pub struct Blockchain {
     pub system: System,
     pub network: Network,
 }
+
+impl Blockchain {
+    pub fn polygon() -> Self {
+        Self {
+            system: System::Ethereum,
+            network: Network::Polygon,
+        }
+    }
+}

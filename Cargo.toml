@@ -16,6 +16,11 @@ serde_json = "^1.0"
 thiserror = "*"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-tokio = {version = "*", features = ["macros", "rt-multi-thread", "fs"]}
+tokio = {version = "*", features = ["macros", "rt-multi-thread", "fs", "time"]}
 tokio-tungstenite = { version = "*",  features = ["connect", "rustls-tls"] }
 url = "*"
+ethers = { version = "0.6", optional = true}
+hex = "*"
+
+[dev-dependencies]
+ethers = { version = "0.6"}

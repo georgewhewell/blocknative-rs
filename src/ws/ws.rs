@@ -14,7 +14,9 @@ use tokio_tungstenite::{
     tungstenite::{self, protocol::CloseFrame},
 };
 
-use super::models::{HelloMsg, JsonRpcError, Request, Response, TransactionSubscribe};
+use super::models::{
+    HelloMsg, JsonRpcError, Request, Response, TransactionSubscribe, WatchConfig, WatchRequest,
+};
 use crate::models::Blockchain;
 use tracing::{debug, error, warn};
 
@@ -28,12 +30,21 @@ type WsStreamItem = Result<Message, WsError>;
 /// Instructions for the `WsServer`.
 #[derive(Debug)]
 enum Instruction {
+    // Send keepalive
+    Ping,
     /// JSON-RPC request
-    Request { request: String },
+    Request {
+        request: String,
+    },
     /// Create a new subscription
-    Subscribe { id: u64, sink: Subscription },
+    Subscribe {
+        id: u64,
+        sink: Subscription,
+    },
     /// Cancel an existing subscription
-    Unsubscribe { id: u64 },
+    Unsubscribe {
+        id: u64,
+    },
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -65,6 +76,14 @@ impl Ws {
         S: Send + Sync + Stream<Item = WsStreamItem> + Sink<Message, Error = WsError> + Unpin,
     {
         let (sink, stream) = mpsc::unbounded();
+
+        let mut ping_sink = sink.clone();
+        tokio::task::spawn(async move {
+            loop {
+                ping_sink.send(Instruction::Ping).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        });
 
         // Spawn the server
         WsServer::new(ws, stream).spawn();
@@ -126,18 +145,20 @@ impl Ws {
 pub type NotificationStream = mpsc::UnboundedReceiver<Response>;
 
 impl Ws {
-    pub async fn listen(&self) -> Result<NotificationStream, ClientError> {
+    pub async fn listen(&self, config: WatchConfig) -> Result<NotificationStream, ClientError> {
         let (sink, stream) = mpsc::unbounded();
+
+        tracing::info!("Subscribing to filter on scope: {}", config.scope);
+
+        let req = WatchRequest { config };
+        self.cast("configs", "put", req).await.unwrap();
+
         self.send(Instruction::Subscribe {
             id: 1u32.into(),
             sink,
         })?;
-        Ok(stream)
-    }
 
-    pub async fn set_config<R: Serialize + Send + Sync>(&self, req: R) -> Result<(), ClientError> {
-        self.cast("configs", "put", req).await.unwrap();
-        Ok(())
+        Ok(stream)
     }
 
     pub async fn unsubscribe<T: Into<u64>>(&self, id: T) -> Result<(), ClientError> {
@@ -214,14 +235,18 @@ where
 
     // dispatch an RPC request
     async fn service_request(&mut self, request: String) -> Result<(), ClientError> {
-        // self.push(sender);
-
         tracing::debug!("Sending to ws: {:#?}", &request);
         if let Err(e) = self.ws.send(Message::Text(request)).await {
             error!("WS connection error: {:?}", e);
             self.pending.pop();
         }
 
+        Ok(())
+    }
+
+    /// Dispatch a subscription request
+    async fn service_ping(&mut self) -> Result<(), ClientError> {
+        self.ws.send(Message::Ping(vec![])).await?;
         Ok(())
     }
 
@@ -254,21 +279,25 @@ where
                 request,
                 // sender,
             } => self.service_request(request).await,
+            Instruction::Ping => self.service_ping().await,
             Instruction::Subscribe { id, sink } => self.service_subscribe(id, sink).await,
             Instruction::Unsubscribe { id } => self.service_unsubscribe(id).await,
         }
     }
 
     async fn handle_ping(&mut self, inner: Vec<u8>) -> Result<(), ClientError> {
+        tracing::debug!("handle ping: {:?}", inner);
         self.ws.send(Message::Pong(inner)).await?;
         Ok(())
     }
 
     async fn handle_text(&mut self, inner: String) -> Result<(), ClientError> {
         tracing::debug!(inner = ?&inner);
+        let inner_dbg = inner.clone();
         match serde_json::from_str::<Incoming>(&inner) {
             Err(e) => {
                 tracing::error!(e = ?&e);
+                tracing::error!("inner: {}", inner_dbg);
             }
             Ok(Incoming::HelloMsg(_)) => {}
             Ok(Incoming::Response(resp)) => {
@@ -362,8 +391,6 @@ pub enum ClientError {
 }
 
 #[cfg(test)]
-#[cfg(not(feature = "celo"))]
-#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use crate::{
@@ -383,12 +410,13 @@ mod tests {
             .await
             .unwrap();
 
-        let s = read_to_string("examples/clams.json").await.unwrap();
+        let s = read_to_string("examples/quickswap.json").await.unwrap();
         let abi = serde_json::from_str(&s).unwrap();
+
         let mut filters = HashMap::new();
         filters.insert(
             "contractCall.params.path".to_string(),
-            "0x4d6A30EFBE2e9D7A9C143Fce1C5Bb30d9312A465".to_string(),
+            "0xC250e9987A032ACAC293d838726C511E6E1C029d".to_string(),
         );
         let sub = WatchRequest {
             config: WatchConfig {
@@ -399,11 +427,15 @@ mod tests {
             },
         };
 
-        ws.set_config(1u32, sub).await.unwrap();
+        ws.set_config(sub).await.unwrap();
         let mut stream = ws.listen().await.unwrap();
 
         while let Some(event) = stream.next().await {
             println!("got event: {:?}", event);
+            let txn = event.event.unwrap().transaction.unwrap();
+            // let ether_tx: ethers::prelude::Transaction = txn.into();
+
+            // println("")
             break;
         }
     }
