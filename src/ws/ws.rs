@@ -418,17 +418,15 @@ mod tests {
             "contractCall.params.path".to_string(),
             "0xC250e9987A032ACAC293d838726C511E6E1C029d".to_string(),
         );
-        let sub = WatchRequest {
-            config: WatchConfig {
-                scope: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff".to_string(),
-                filters: vec![filters],
-                abi,
-                watch_address: true,
-            },
+
+        let config=  WatchConfig {
+            scope: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff".to_string(),
+            filters: vec![filters],
+            abi,
+            watch_address: true,
         };
 
-        ws.set_config(sub).await.unwrap();
-        let mut stream = ws.listen().await.unwrap();
+       let mut stream = ws.listen(config).await.unwrap();
 
         while let Some(event) = stream.next().await {
             println!("got event: {:?}", event);
