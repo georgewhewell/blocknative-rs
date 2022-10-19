@@ -38,13 +38,10 @@ enum Instruction {
     },
     /// Create a new subscription
     Subscribe {
-        id: u64,
         sink: Subscription,
     },
     /// Cancel an existing subscription
-    Unsubscribe {
-        id: u64,
-    },
+    Unsubscribe,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -145,33 +142,41 @@ impl Ws {
 pub type NotificationStream = mpsc::UnboundedReceiver<Response>;
 
 impl Ws {
-    pub async fn listen(&self, config: WatchConfig) -> Result<NotificationStream, ClientError> {
+    pub async fn subscribe(&self, config: WatchConfig) -> Result<NotificationStream, ClientError> {
         let (sink, stream) = mpsc::unbounded();
 
         tracing::info!("Subscribing to filter on scope: {}", config.scope);
 
         let req = WatchRequest { config };
-        self.cast("configs", "put", req).await.unwrap();
 
-        self.send(Instruction::Subscribe {
-            id: 1u32.into(),
-            sink,
-        })?;
+        // cast configs message and subscribe
+        self.cast("configs", "put", req).await.unwrap();
+        self.send(Instruction::Subscribe { sink })?;
+
+        Ok(stream)
+    }
+
+    pub async fn subscribe_many(
+        &self,
+        configs: Vec<WatchConfig>,
+    ) -> Result<NotificationStream, ClientError> {
+        let (sink, stream) = mpsc::unbounded();
+
+        for config in configs {
+            tracing::info!("Subscribe to filter on scope: {}", config.scope);
+
+            let req = WatchRequest { config };
+
+            // cast configs message and subscribe
+            self.cast("configs", "put", req).await.unwrap();
+            self.send(Instruction::Subscribe { sink: sink.clone() });
+        }
 
         Ok(stream)
     }
 
     pub async fn unsubscribe<T: Into<u64>>(&self, id: T) -> Result<(), ClientError> {
-        self.cast(
-            "activeTransaction",
-            "unwatch",
-            TransactionSubscribe::new(
-                "0x0b4c94c414f71ddd5e7a625fcaa83ff1f93e9a7ca37e0f577b488ac8fd786655".to_string(),
-            ),
-        )
-        .await
-        .unwrap();
-        self.send(Instruction::Unsubscribe { id: id.into() })
+        self.send(Instruction::Unsubscribe)
     }
 }
 
@@ -179,7 +184,7 @@ struct WsServer<S> {
     ws: Fuse<S>,
     instructions: Fuse<mpsc::UnboundedReceiver<Instruction>>,
     pending: Vec<Pending>,
-    subscriptions: BTreeMap<u64, Subscription>,
+    subscription: Option<Subscription>,
 }
 
 impl<S> WsServer<S>
@@ -194,7 +199,7 @@ where
             ws: ws.fuse(),
             instructions: requests.fuse(),
             pending: Vec::default(),
-            subscriptions: BTreeMap::default(),
+            subscription: None,
         }
     }
 
@@ -203,7 +208,7 @@ where
     /// If this method returns `true`, then the `instructions` channel has been closed and all
     /// pending requests and subscriptions have been completed.
     fn is_done(&self) -> bool {
-        self.instructions.is_done() && self.pending.is_empty() && self.subscriptions.is_empty()
+        self.instructions.is_done() && self.pending.is_empty() && self.subscription.is_none()
     }
 
     /// Spawns the event loop
@@ -251,23 +256,24 @@ where
     }
 
     /// Dispatch a subscription request
-    async fn service_subscribe(&mut self, id: u64, sink: Subscription) -> Result<(), ClientError> {
-        if self.subscriptions.insert(id, sink).is_some() {
-            warn!("Replacing already-registered subscription with id {:?}", id);
-        } else {
+    async fn service_subscribe(&mut self, sink: Subscription) -> Result<(), ClientError> {
+        if self.subscription.is_some() {
+            warn!("Replacing already registered subscription.");
         }
-        // self.service_request(request)
+
+        self.subscription = Some(sink);
+
         Ok(())
     }
 
     /// Dispatch a unsubscribe request
-    async fn service_unsubscribe(&mut self, id: u64) -> Result<(), ClientError> {
-        if self.subscriptions.remove(&id).is_none() {
-            warn!(
-                "Unsubscribing from non-existent subscription with id {:?}",
-                id
-            );
+    async fn service_unsubscribe(&mut self) -> Result<(), ClientError> {
+        if self.subscription.is_none() {
+            warn!("Unsubscribing from non-existent subscription.");
         }
+
+        self.subscription = None;
+
         Ok(())
     }
 
@@ -280,8 +286,8 @@ where
                 // sender,
             } => self.service_request(request).await,
             Instruction::Ping => self.service_ping().await,
-            Instruction::Subscribe { id, sink } => self.service_subscribe(id, sink).await,
-            Instruction::Unsubscribe { id } => self.service_unsubscribe(id).await,
+            Instruction::Subscribe { sink } => self.service_subscribe(sink).await,
+            Instruction::Unsubscribe => self.service_unsubscribe().await,
         }
     }
 
@@ -302,12 +308,12 @@ where
             Ok(Incoming::HelloMsg(_)) => {}
             Ok(Incoming::Response(resp)) => {
                 if resp.raw.is_none() {
-                    if let Entry::Occupied(stream) = self.subscriptions.entry(1u64) {
-                        if let Err(err) = stream.get().unbounded_send(resp) {
+                    if let Some(stream) = &self.subscription  {
+                        if let Err(err) = stream.unbounded_send(resp) {
                             if err.is_disconnected() {
-                                // subscription channel was closed on the receiver end
-                                stream.remove();
+                                self.subscription = None;
                             }
+
                             return Err(to_client_error(err));
                         }
                     }
@@ -426,7 +432,7 @@ mod tests {
             watch_address: true,
         };
 
-        let mut stream = ws.listen(config).await.unwrap();
+        let mut stream = ws.subscribe(config).await.unwrap();
 
         while let Some(event) = stream.next().await {
             println!("got event: {:?}", event);
