@@ -38,7 +38,7 @@ pub async fn main() {
         "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
     );
 
-    let mut stream = ws.listen(config).await.unwrap();
+    let mut stream = ws.subscribe(config).await.unwrap();
     tracing::info!("Waiting for events..");
 
     while let Some(response) = stream.next().await {
