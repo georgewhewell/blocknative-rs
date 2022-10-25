@@ -134,6 +134,24 @@ pub enum GasInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE", tag = "type")]
+pub enum InternalTransaction {
+    DelegateCall(InternalTransactionDetails),
+    Call(InternalTransactionDetails),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalTransactionDetails {
+    pub from: String,
+    pub to: String,
+    pub input: String,
+    pub gas: u64,
+    pub gas_used: u64,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     pub status: String,
@@ -159,6 +177,7 @@ pub struct Transaction {
     pub asset: String,
     #[serde(flatten)]
     pub watch_info: Option<WatchedAddressInfo>,
+    pub internal_transactions: Option<Vec<InternalTransaction>>,
 }
 
 #[cfg(feature = "ethers")]
