@@ -134,6 +134,24 @@ pub enum GasInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE", tag = "type")]
+pub enum InternalTransaction {
+    DelegateCall(InternalTransactionDetails),
+    Call(InternalTransactionDetails),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalTransactionDetails {
+    pub from: String,
+    pub to: String,
+    pub input: String,
+    pub gas: u64,
+    pub gas_used: u64,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     pub status: String,
@@ -159,6 +177,7 @@ pub struct Transaction {
     pub asset: String,
     #[serde(flatten)]
     pub watch_info: Option<WatchedAddressInfo>,
+    pub internal_transactions: Option<Vec<InternalTransaction>>,
 }
 
 #[cfg(feature = "ethers")]
@@ -292,6 +311,7 @@ mod tests {
     fn test_decode_2() {
         let json = r#"{"version":0,"serverVersion":"0.127.0","timeStamp":"2022-02-05T00:14:59.330Z","connectionId":"c3-88afabe3-1df7-436d-b91e-15f485528494","status":"ok","event":{"timeStamp":"2022-02-05T00:14:59.330Z","categoryCode":"activeAddress","eventCode":"txPoolSimulation","dappId":"7d507b2c-48f2-48bb-bd79-fc16ced6f8cf","blockchain":{"system":"ethereum","network":"main"},"transaction":{"status":"pending-simulation","monitorId":"Geth_1_D_PROD","monitorVersion":"0.108.0","pendingTimeStamp":"2022-02-05T00:14:59.317Z","pendingBlockNumber":14142762,"hash":"0xebc639e7f6bd7a3c3d8ad5a58f805fa8e024c0308ee784179a7fb8716859e095","from":"0x38Ab1C0e1c3a185594792F7FD7212Eeb563F044C","to":"0x9011F2133A705Fe72226647B5B246086C6b72140","value":"0","gas":461111,"nonce":53,"blockHash":null,"blockNumber":null,"v":"0x0","r":"0xfc3419eb5467401484773f1449af01e606e2a49db885e189b72ddcee4f100969","s":"0x2f5106ee50c3f13169d9b13b8cae0faaae116a640e17c169a187451e731a0015","input":"0x4585e33b00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000060000000000000000000000000a4492fcda2520cb68657d220f4d4ae3116359c1004000000000000000000000061fdbe00000000000000113000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000","type":2,"maxFeePerGas":"200638563976","maxFeePerGasGwei":201,"maxPriorityFeePerGas":"2500000000","maxPriorityFeePerGasGwei":2.5,"asset":"ETH","watchedAddress":"0xa4492fcda2520cb68657d220f4d4ae3116359c10","direction":"","counterparty":"","internalTransactions":[{"type":"CALL","from":"0x9011f2133a705fe72226647b5b246086c6b72140","to":"0xa4492fcda2520cb68657d220f4d4ae3116359c10","input":"0xb50e7ee304000000000000000000000061fdbe00000000000000113000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000","gas":428734,"gasUsed":422208,"value":"0"},{"type":"DELEGATECALL","from":"0xa4492fcda2520cb68657d220f4d4ae3116359c10","to":"0x09fde18700c82a8f3134a5c01dc58f6cb2396a40","input":"0xb50e7ee304000000000000000000000061fdbe00000000000000113000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000","gas":413552,"gasUsed":413552,"value":"0"},{"type":"DELEGATECALL","from":"0xa4492fcda2520cb68657d220f4d4ae3116359c10","to":"0x0f6e8ef18fb5bb61d545fee60f779d8aed60408f","input":"0xe101a89b000000000000000000000000000000000000000000000000ce29650ccf5b657000000000000000000000000000000000000000000007d32e5806f7ba38d4987e00000000000000000000000000000000000000000007d3925806f7ba38d4987e0000000000000000000000000000000000000000000000008000000000000000","gas":313699,"gasUsed":4910,"value":"0"},{"type":"CALL","from":"0xa4492fcda2520cb68657d220f4d4ae3116359c10","to":"0x9abb27581c2e46a114f8c367355851e0580e9703","input":"0xedaf7d5b000000000000000000000000a73342309f77e7dd2ebb5893a651bec7c472aa6a000000000000000000000000a4492fcda2520cb68657d220f4d4ae3116359c100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000176c3cdeaf06cd0a000000000000000000000000000000000000000000000000176c3cdeaf06cd0a0000000000000000000000000000000000000000000000275a4f8834009d4b7c","gas":111344,"gasUsed":39785,"value":"0"},{"type":"DELEGATECALL","from":"0x9abb27581c2e46a114f8c367355851e0580e9703","to":"0x1b890f72b21233cb38666fb81161c4bbe15f1f5d","input":"0xedaf7d5b000000000000000000000000a73342309f77e7dd2ebb5893a651bec7c472aa6a000000000000000000000000a4492fcda2520cb68657d220f4d4ae3116359c100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000176c3cdeaf06cd0a000000000000000000000000000000000000000000000000176c3cdeaf06cd0a0000000000000000000000000000000000000000000000275a4f8834009d4b7c","gas":104505,"gasUsed":34566,"value":"0"}],"netBalanceChanges":[],"simDetails":{"blockNumber":14142762,"performanceProfile":{"breakdown":[{"label":"detected","timeStamp":"2022-02-05T00:14:59.330Z"},{"label":"traceStart","timeStamp":"2022-02-05T00:14:59.331Z"},{"label":"traceEnd","timeStamp":"2022-02-05T00:14:59.415Z"},{"label":"dispatch","timeStamp":"2022-02-05T00:14:59.426Z"}],"e2eMs":96}}}},"dispatchTimestamp":"2022-02-05T00:14:59.427Z"}"#;
         let resp: Response = serde_json::from_str(json).unwrap();
+        println!("{resp:?}");
     }
 
     #[test]
